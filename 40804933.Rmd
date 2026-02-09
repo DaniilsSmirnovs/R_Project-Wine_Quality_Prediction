@@ -1,0 +1,712 @@
+---
+title: "Wine Quality Analysis"
+output: pdf_document
+date: "2025-11-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries
+
+```{r}
+library(readr)
+library(naniar)
+library(ggplot2)
+library(tidymodels)
+library(tidyr)
+library(DescTools)
+library(tibble)
+library(car)
+library(MASS)
+library(effects)
+library(dplyr)
+```
+
+# Data Import
+
+```{r Data Set Import}
+wine <- read_csv("winequalityN.csv")
+```
+
+# Data Set Overview 
+
+## Structure of the Data Set
+
+Exploring the overall structure of the data set:
+
+```{r}
+summary(wine)
+```
+
+```{r}
+head(wine)
+```
+
+Checking if there any duplicates in the data set:
+
+```{r}
+wine |>
+  group_by(ID) |> 
+  summarise(n = n()) |>
+  filter(n > 1L)
+```
+
+## Handling Missing Values
+
+Calculating how many missing values this data set contains:
+
+```{r}
+sum(is.na(wine))
+```
+
+Investigating which rows contain missing values:
+
+```{r}
+wine |> 
+  filter(if_any(everything(),is.na))
+```
+
+Investigating which fields contain missing values:
+
+```{r}
+colSums(is.na(wine))
+```
+
+Little's Missing Completely at Random (MCAR) Test:
+
+```{r}
+mcar_test(wine |> dplyr::select(fixed_acidity:quality))
+```
+
+Is removing missing values going to affect my sample size?
+
+```{r}
+sum(is.na(wine)) / nrow(wine) * 100
+
+# Less than 1% of all observations contain missing values.
+```
+
+Performing listwise deletion:
+
+```{r}
+wine <- na.omit(wine)
+```
+
+## Wine Quality
+
+Identifying unique quality scores:
+
+```{r}
+unique(wine$quality)
+```
+
+Transforming quality variable to factor and renaming it to `quality_score`:
+
+```{r}
+# Creating quality levels
+quality_levels <- c("3", "4", "5", "6", "7", "8", "9")
+
+wine <- wine |> 
+  mutate(quality = factor(quality, levels = quality_levels)) |> 
+  rename(quality_score = quality)
+
+rm(quality_levels)
+```
+
+Creating colour scheme for quality scores:
+
+```{r}
+clr_score <- c(
+  "3" = "#8B0000",
+  "4" = "#B22222",
+  "5" = "#FF8C00",
+  "6" = "#FFBF00",
+  "7" = "#9ACD32",
+  "8" = "#32CD32",
+  "9" = "#008000"
+)
+```
+
+
+Exploring distribution of wine quality scores:
+
+```{r}
+wine |> 
+  ggplot(aes(x = quality_score)) +
+  geom_bar(
+    aes(fill = quality_score),  
+    alpha = 0.7,
+    show.legend = FALSE
+    ) +
+  geom_text(
+    stat = "count",
+    aes(label = after_stat(count)),
+    vjust = -0.3
+    ) +
+  theme_minimal() +
+  labs(
+    x = "Wine Quality Score",
+    y = "Wine Count"
+    ) +
+  scale_fill_manual(
+    values = clr_score
+  ) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 12)
+  )
+```
+
+Creating quality groups:
+
+```{r}
+wine <- wine |> 
+  mutate(
+    quality_category = case_when(
+      quality_score %in% c("3", "4", "5") ~ "bad",
+      quality_score %in% c("7", "8", "9") ~ "good",
+      quality_score == "6" ~ "average",
+    ),
+    quality_category = factor(
+      quality_category, 
+      levels = c("bad", "average", "good")
+    )
+  )
+```
+
+Creating colour scheme for quality groups:
+
+```{r}
+clr_category <- c(
+  "bad"     =  "#CC5500",
+  "average" =  "#FFBF00",
+  "good"    =  "#4CAF50"
+)
+```
+
+Visualising new quality categories:
+
+```{r}
+wine |> 
+  ggplot(aes(x = quality_category)) +
+  geom_bar(
+    aes(fill = quality_category),
+    alpha = 0.7,
+    show.legend = FALSE
+    ) +
+  geom_text(
+    stat = "count",
+    aes(label = after_stat(count)),
+    vjust = -0.3
+    ) +
+  theme_minimal() +
+  labs(
+    x = "Wine Quality Group",
+    y = "Wine Count"
+    ) +
+  scale_fill_manual(
+    values = clr_category
+  ) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 12)
+  )
+```
+
+
+## Wine Type
+
+What are the unique types of wines within the data set?
+
+```{r}
+unique(wine$type)
+```
+
+Transforming `type` variable into the factor with two levels: "white" and "red":
+
+```{r}
+wine <- wine |> 
+  mutate(type = factor(type))
+```
+
+Counting the number of white and red wines within the data set:
+
+```{r}
+wine |> 
+  group_by(type) |> 
+  summarise(
+    wine_count = n(),
+    wine_prop = wine_count/6497
+    )
+```
+
+Exploring quality group sizes for red and white wines:
+
+```{r}
+wine |> 
+  mutate(type = if_else(type == "red", "Red Wine", "White Wine")) |> 
+  ggplot(aes(x = quality_category)) +
+  geom_bar(
+    aes(fill = quality_category), 
+    alpha = 0.8,
+    show.legend = FALSE
+    ) +
+  facet_wrap(~type) +
+  geom_text(
+    stat = "count",
+    aes(label = after_stat(count)),
+    vjust = -0.3
+    ) +
+  theme_minimal() +
+  scale_fill_manual(values = clr_category) +
+  labs(
+    x = "Wine Quality Category",
+    y = "Overall Wine Count"
+    ) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 12),
+    strip.text   = element_text(size = 12)
+  )
+```
+
+## Data Set Split
+
+Splitting data into training and test for red and white wines:
+
+```{r}
+wine$split <- interaction(wine$type, wine$quality_score)
+
+set.seed(123)
+split <- initial_split(wine, prop = 0.8, strata = split)
+
+train <- training(split)
+test  <- testing(split)
+
+rm(split)
+```
+
+Creating separate data sets for each group:
+
+```{r}
+train <- train |> 
+  dplyr::select(-quality_score, -split)
+
+test <- test |> 
+  dplyr::select(-quality_score, -split)
+```
+
+Visualising final sizes of groups used for EDA/Modelling:
+
+```{r}
+train |> 
+  mutate(type = if_else(type == "red", "Red Wine", "White Wine")) |> 
+  ggplot(aes(x = quality_category)) +
+  geom_bar(
+    aes(fill = quality_category), 
+    alpha = 0.8,
+    show.legend = FALSE
+    ) +
+  facet_wrap(~type) +
+  geom_text(
+    stat = "count",
+    aes(label = after_stat(count)),
+    vjust = -0.3
+    ) +
+  theme_minimal() +
+  scale_fill_manual(values = clr_category) +
+  labs(
+    x = "Wine Quality Category",
+    y = "EDA/Modelling Wine Count"
+    ) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 12),
+    strip.text   = element_text(size = 12)
+  )
+```
+
+
+## Wine Physicochemical Properties
+
+### Univariate Analysis
+
+Data set transformation into tidy data, moving all columns that describe the wine's physicochemical properties into one column, with the respective values in another column:
+
+```{r}
+tidy_train <- train |> 
+  pivot_longer(
+    cols = fixed_acidity:alcohol,
+    names_to = "property_name",
+    values_to = "property_value"
+  )
+```
+
+Renaming each property name:
+
+```{r}
+# Creating new property labels: 
+
+property_labels <- c(
+  alcohol = "Alcohol Percentage by Volume",
+  chlorides = "Sodium Chloride (g/L)",
+  citric_acid = "Citric Acid (g/L)",
+  density = "Density (g/cm3)",
+  fixed_acidity = "Fixed Acidity (g/L)",
+  free_sulfur_dioxide = "Free Sulphur Dioxide (mg/L)",
+  total_sulfur_dioxide = "Total Sulphur Dioxide (mg/L)",
+  pH = "pH",
+  residual_sugar = "Sugar (g/L)",
+  sulphates = "Potassium Sulphate (g/L)",
+  volatile_acidity = "Volatile Acidity (g/L)"
+)
+
+# Replacing old property labels with the new ones:
+tidy_train <- tidy_train |> 
+  mutate(property_name = property_labels[property_name])
+```
+
+Transforming `property_name` column into a factor:
+
+```{r}
+# Creating property levels:
+# (I want them in specific order - e.g., variables that relate to 
+# acidity grouped together).
+
+property_order <- c(
+                     "Volatile Acidity (g/L)", 
+                     "Fixed Acidity (g/L)", 
+                     "Citric Acid (g/L)",
+                     "pH",
+                     "Free Sulphur Dioxide (mg/L)", 
+                     "Total Sulphur Dioxide (mg/L)", 
+                     "Potassium Sulphate (g/L)",
+                     "Sodium Chloride (g/L)", 
+                     "Sugar (g/L)", 
+                     "Density (g/cm3)",
+                     "Alcohol Percentage by Volume"
+                     )
+
+tidy_train <- tidy_train |> 
+  mutate(
+    property_name = factor(property_name, levels = property_order)
+  )
+```
+
+Visualising data distribution for each property (histograms):
+
+```{r}
+tidy_train |> 
+  ggplot(aes(x = property_value)) +
+  geom_histogram() +
+  facet_wrap(
+    ~property_name, 
+    scales = "free",
+    nrow = 4
+  ) +
+  labs(
+    y = "Wine Count",
+    x = "Physicochemical Property Value"
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 11),
+    strip.text   = element_text(size = 11)
+  )
+```
+
+Visualising data distribution for each property (boxplots):
+
+```{r}
+tidy_train |> 
+  ggplot(aes(x = factor(1), y = property_value)) +
+  geom_boxplot(width = 0.7) +
+  facet_wrap(
+    ~property_name, 
+    scales = "free_y",
+    nrow = 4
+  ) +
+  labs(
+    y = "Physicochemical Property Value"
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12),
+    axis.text.y  = element_text(size = 11),
+    axis.text.x  = element_blank(),
+    strip.text   = element_text(size = 11)
+  )
+```
+
+### Capping Outliers
+
+I capped outliers for red and white wines separately:
+
+```{r}
+ws_train <- train |>
+  group_by(type) |> 
+  mutate(across(
+    fixed_acidity:alcohol, 
+    ~Winsorize(.,val = quantile(., probs = c(0.05, 0.95)))
+    )
+  ) |> 
+  ungroup()
+```
+
+Creating a tidy version of the winsorized data set:
+
+```{r}
+ws_tidy_train <- ws_train |> 
+  pivot_longer(
+    cols = fixed_acidity:alcohol,
+    names_to = "property_name",
+    values_to = "property_value"
+  )
+
+ws_tidy_train <- ws_tidy_train |> 
+  mutate(property_name = property_labels[property_name])
+
+ws_tidy_train <- ws_tidy_train |> 
+  mutate(
+    property_name = factor(property_name, levels = property_order)
+  )
+```
+
+Investigating how winsorization affected outliers:
+
+```{r}
+ws_tidy_train |> 
+  
+   # Select which group of wine - "red" or "white" - to investigate:
+  filter(type == "white") |> 
+  ggplot(aes(x = factor(1), y = property_value)) +
+  geom_boxplot(width = 0.7) +
+  facet_wrap(
+    ~property_name, 
+    scales = "free_y",
+    nrow = 4
+  ) +
+  labs(
+    y = "Physicochemical Property Value"
+  ) + 
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 12),
+    axis.text.y  = element_text(size = 11),
+    axis.text.x  = element_blank(),
+    strip.text   = element_text(size = 11)
+  )
+```
+
+### Multivariate Analysis
+
+```{r}
+# Select if you want to visualise tidy data set (i.e., "tidy_train") 
+# or winsorized data set (i.e., "ws_tidy_train")
+
+tidy_train |> 
+  
+  # Select which group of wine - "red" or "white" - to investigate:
+  filter(type == "red") |> 
+  
+  ggplot(aes(x = quality_category, y = property_value)) +
+  geom_boxplot(
+    aes(fill = quality_category),
+    show.legend = FALSE
+  ) +
+  facet_wrap(
+    ~property_name, 
+    scales = "free_y",
+    nrow = 4
+  ) +
+  labs(
+    y = "Physicochemical Property Value",
+    x = "Quality Category"
+  ) + 
+  theme_minimal() +
+  scale_fill_manual(values = clr_category) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 11),
+    strip.text   = element_text(size = 11)
+  )
+```
+
+Checking for multicollinearity using Variance Inflation Factor (VIF):
+
+```{r}
+lm_model <- lm(
+  fixed_acidity ~ ., 
+  
+  # Select if you want to visualise regular or winsorized data set
+  # And which group of wine - "red" or "white" - to investigate:
+  data = dplyr::select(ws_train |> filter(type == "white"), fixed_acidity:alcohol)
+  )
+
+vif_values <- vif(lm_model)
+vif_values
+```
+
+```{r}
+rm(list = c("lm_model", "vif_values"))
+```
+
+# Wine Type Selection
+
+To avoid code repetition select which group of wine – "red" or "white" – to investigate further:
+
+```{r}
+# input either "red" or "white"
+
+tp_wine <- "red"
+```
+
+The code below first runs principal component analysis and then fits ordinal logistic regression on the specified wine type. 
+
+# Principal Component Analysis
+
+```{r}
+pca <- prcomp(
+  dplyr::select(ws_train |>  filter(type == tp_wine), fixed_acidity:alcohol),
+  scale. = TRUE
+)
+```
+
+```{r}
+plot(pca, type = 'l')
+```
+
+```{r}
+summary(pca)
+```
+
+```{r}
+loadings <- 
+  pca$rotation |> 
+  as.data.frame() |> 
+  rownames_to_column("property_name")
+```
+
+Investigating the first 3 principal components:
+
+```{r}
+loadings |> 
+  pivot_longer(
+    cols = PC1:PC11,
+    names_to = "PC_number",
+    values_to = "PC_value"
+  ) |> 
+  mutate(property_name = property_labels[property_name]) |> 
+  filter(PC_number %in% c("PC1", "PC2", "PC3")) |> 
+  ggplot(aes(y = PC_value, x = property_name)) +
+  geom_col() +
+  coord_flip() + 
+  theme_minimal() +
+  facet_wrap(~PC_number) +
+  labs(
+    y = "Loading Value",
+    x = "Physicochemical Property"
+  ) +
+  theme(
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    axis.text    = element_text(size = 11),
+    strip.text   = element_text(size = 11)
+  )
+```
+
+```{r}
+scores_train <- 
+  pca$x |> 
+  as.data.frame() |> 
+  cbind(train |> filter(type == tp_wine))
+```
+
+# Ordinal Logistic Regression
+
+## Building Models
+
+```{r}
+model= polr(
+  quality_category ~ PC1 + PC2 + PC3 , 
+  data = scores_train, 
+  Hess = TRUE
+  )
+```
+
+```{r}
+summary(model)
+```
+
+Estimating OR and confidence intervals:
+
+```{r}
+exp(cbind(OR = coef(model), confint(model)))
+```
+
+```{r}
+plot(
+  Effect(focal.predictors = "PC3", model),
+  xlab = "PC Score",
+  ylab = "Predicted Probability"
+)
+```
+
+
+## Testing Models
+
+Calculating 5th and 95th percentile cutoffs:
+
+```{r}
+winsor_cutoffs <- apply(
+  dplyr::select(train |>  filter(type == tp_wine), fixed_acidity:alcohol),
+  2,
+  function(x) quantile(x, probs = c(0.05, 0.95))
+)
+```
+
+Applying winsorization to the test data:
+
+```{r}
+ws_test <- test |> 
+  dplyr::select(fixed_acidity:alcohol) |> 
+  mutate(across(
+    fixed_acidity:alcohol, 
+    ~pmin(
+      pmax(
+        .x, 
+        winsor_cutoffs[1, cur_column()]
+      ), 
+    winsor_cutoffs[2, cur_column()]
+    ))
+  ) 
+```
+
+Transforming the test data using PCA:
+
+```{r}
+scores_test <- as.data.frame(predict(pca, newdata = ws_test)[, 1:3])
+
+scores_test$quality_category <- test$quality_category
+```
+
+Testing model predictions:
+
+```{r}
+pred_test <- predict(model, newdata = scores_test, type = "class")
+
+table(pred_test, scores_test$quality_category)
+
+mean(pred_test == scores_test$quality_category) 
+```
