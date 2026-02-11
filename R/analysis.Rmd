@@ -27,7 +27,7 @@ library(dplyr)
 # Data Import
 
 ```{r Data Set Import}
-wine <- read_csv("winequalityN.csv")
+wine <- read_csv("../data/winequalityN.csv")
 ```
 
 # Data Set Overview 
